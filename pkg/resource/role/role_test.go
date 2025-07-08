@@ -19,6 +19,8 @@ import (
 const resourceName = "foo"
 
 func TestRole_acceptance(t *testing.T) {
+	ctx := t.Context()
+
 	// Prepare docker compose to run local clickhouse cluster.
 	dcm := testutils.NewDockerComposeManager("../../../tests")
 
@@ -87,7 +89,7 @@ func TestRole_acceptance(t *testing.T) {
 
 			resource.Test(t, resource.TestCase{
 				ProtoV6ProviderFactories: factories.ProviderFactories(),
-				CheckDestroy: internalstatecheck.CheckNotExist(t.Context(), resourceAddress, func(ctx context.Context, attrs map[string]string) (bool, error) {
+				CheckDestroy: internalstatecheck.CheckNotExist(ctx, resourceAddress, func(ctx context.Context, attrs map[string]string) (bool, error) {
 					id := attrs["id"]
 					if id == "" {
 						return false, fmt.Errorf("id attribute was not set")
@@ -107,7 +109,7 @@ func TestRole_acceptance(t *testing.T) {
 									return fmt.Errorf("id was nil")
 								}
 
-								role, err := dbopsClient.GetRole(t.Context(), id.(string), nil)
+								role, err := dbopsClient.GetRole(ctx, id.(string), nil)
 								if err != nil {
 									return err
 								}
