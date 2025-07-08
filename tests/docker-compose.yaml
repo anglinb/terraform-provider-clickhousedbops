@@ -12,14 +12,39 @@ services:
       mode: replicated
       replicas: ${REPLICAS:-2}
       endpoint_mode: dnsrr
+    healthcheck:
+      test: [ "CMD", "wget", "http://localhost:8123", "-O", "/dev/null" ]
+      timeout: 2s
+      retries: 3
+      start_period: 5s
+      start_interval: 5s
     depends_on:
       - zookeeper
     environment:
       - CLICKHOUSE_SKIP_USER_SETUP=1
     volumes:
       - type: 'bind'
-        source: './${CONFIGFILE:-config-cluster-localfile.xml}'
+        source: './${CONFIGFILE:-config-localfile.xml}'
         target: '/etc/clickhouse-server/config.xml'
+
+  # Used to expose the first replica of the clickhouse service defined above in localhost.
+  proxy_http:
+    image: alpine/socat
+    ports:
+      - "8123:8123"
+    command: "tcp-listen:8123,fork,reuseaddr tcp-connect:tests-clickhouse-1:8123"
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+
+  proxy_native:
+    image: alpine/socat
+    ports:
+      - "9000:9000"
+    command: "tcp-listen:9000,fork,reuseaddr tcp-connect:tests-clickhouse-1:9000"
+    depends_on:
+      clickhouse:
+        condition: service_healthy
 
   shell:
     image: ${TFIMG:-hashicorp/terraform}:${TFVER:-1.11}

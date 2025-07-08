@@ -22,3 +22,6 @@ jobs:
 
       - name: Run go tests
         run: make test
+
+      - name: Run terraform acceptance tests
+        run: make tftest

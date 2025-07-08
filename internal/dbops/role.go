@@ -109,5 +109,10 @@ func (i *impl) FindRoleByName(ctx context.Context, name string, clusterName *str
 		return nil, errors.WithMessage(err, "error running query")
 	}
 
+	// No role with such name found.
+	if uuid == "" {
+		return nil, nil
+	}
+
 	return i.GetRole(ctx, uuid, clusterName)
 }
