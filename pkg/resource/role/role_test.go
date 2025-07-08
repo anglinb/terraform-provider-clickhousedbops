@@ -19,7 +19,7 @@ import (
 const resourceName = "foo"
 
 func TestRole_acceptance(t *testing.T) {
-	ctx := t.Context()
+	ctx := context.Background()
 
 	// Prepare docker compose to run local clickhouse cluster.
 	dcm := testutils.NewDockerComposeManager("../../../tests")
