@@ -30,4 +30,9 @@ type Client interface {
 	GetAllGrantsForGrantee(ctx context.Context, granteeUsername *string, granteeRoleName *string, clusterName *string) ([]GrantPrivilege, error)
 
 	IsReplicatedStorage(ctx context.Context) (bool, error)
+
+	CreateTable(ctx context.Context, table Table, clusterName *string) (*Table, error)
+	GetTable(ctx context.Context, uuid string, clusterName *string) (*Table, error)
+	DeleteTable(ctx context.Context, uuid string, clusterName *string) error
+	FindTableByName(ctx context.Context, databaseName, tableName string, clusterName *string) (*Table, error)
 }
