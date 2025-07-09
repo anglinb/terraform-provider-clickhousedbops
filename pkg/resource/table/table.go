@@ -271,7 +271,7 @@ func (r *Resource) Create(ctx context.Context, req resource.CreateRequest, resp 
 		return
 	}
 
-	state, err := r.syncTableState(ctx, table.UUID, plan.ClusterName.ValueStringPointer())
+	state, err := r.syncTableState(ctx, table.UUID, plan.ClusterName.ValueStringPointer(), &plan)
 	if err != nil {
 		resp.Diagnostics.AddError(
 			"Error syncing table",
@@ -303,7 +303,7 @@ func (r *Resource) Read(ctx context.Context, req resource.ReadRequest, resp *res
 		return
 	}
 
-	state, err := r.syncTableState(ctx, plan.UUID.ValueString(), plan.ClusterName.ValueStringPointer())
+	state, err := r.syncTableState(ctx, plan.UUID.ValueString(), plan.ClusterName.ValueStringPointer(), &plan)
 	if err != nil {
 		resp.Diagnostics.AddError(
 			"Error syncing table",
@@ -386,8 +386,12 @@ func (r *Resource) ImportState(ctx context.Context, req resource.ImportStateRequ
 			return
 		}
 
+		// Set basic attributes
 		resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("uuid"), table.UUID)...)
 		resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("database_name"), databaseName)...)
+		resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("name"), table.Name)...)
+		resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("engine"), types.StringValue(table.Engine))...)
+		resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("comment"), types.StringValue(table.Comment))...)
 	} else {
 		// User passed a UUID
 		resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("uuid"), tableRef)...)
@@ -400,7 +404,7 @@ func (r *Resource) ImportState(ctx context.Context, req resource.ImportStateRequ
 }
 
 // syncTableState reads table settings from clickhouse and returns a Table
-func (r *Resource) syncTableState(ctx context.Context, uuid string, clusterName *string) (*Table, error) {
+func (r *Resource) syncTableState(ctx context.Context, uuid string, clusterName *string, plan *Table) (*Table, error) {
 	table, err := r.client.GetTable(ctx, uuid, clusterName)
 	if err != nil {
 		return nil, errors.WithMessage(err, "cannot get table")
@@ -432,24 +436,91 @@ func (r *Resource) syncTableState(ctx context.Context, uuid string, clusterName 
 		return nil, errors.New("failed to create order by list")
 	}
 
-	// Convert primary key
-	primaryKeyValues := make([]attr.Value, len(table.PrimaryKey))
-	for i, col := range table.PrimaryKey {
-		primaryKeyValues[i] = types.StringValue(col)
-	}
-	primaryKeyList, diags := types.ListValue(types.StringType, primaryKeyValues)
-	if diags.HasError() {
-		return nil, errors.New("failed to create primary key list")
+	// Convert primary key - handle auto-inference by ClickHouse
+	var primaryKeyList types.List
+	if plan != nil {
+		// Get the planned primary key
+		var plannedPrimaryKey []string
+		if !plan.PrimaryKey.IsNull() {
+			diags = plan.PrimaryKey.ElementsAs(ctx, &plannedPrimaryKey, false)
+			if diags.HasError() {
+				return nil, errors.New("failed to parse planned primary key")
+			}
+		}
+		
+		// If plan had empty primary key but ClickHouse inferred one, keep plan's empty list
+		if len(plannedPrimaryKey) == 0 && len(table.PrimaryKey) > 0 {
+			primaryKeyList = plan.PrimaryKey
+		} else {
+			primaryKeyValues := make([]attr.Value, len(table.PrimaryKey))
+			for i, col := range table.PrimaryKey {
+				primaryKeyValues[i] = types.StringValue(col)
+			}
+			primaryKeyList, diags = types.ListValue(types.StringType, primaryKeyValues)
+			if diags.HasError() {
+				return nil, errors.New("failed to create primary key list")
+			}
+		}
+	} else {
+		primaryKeyValues := make([]attr.Value, len(table.PrimaryKey))
+		for i, col := range table.PrimaryKey {
+			primaryKeyValues[i] = types.StringValue(col)
+		}
+		primaryKeyList, diags = types.ListValue(types.StringType, primaryKeyValues)
+		if diags.HasError() {
+			return nil, errors.New("failed to create primary key list")
+		}
 	}
 
-	// Convert settings
+	// Convert settings - only include settings that were explicitly set in the plan
 	settingsMap := make(map[string]attr.Value)
-	for k, v := range table.Settings {
-		settingsMap[k] = types.StringValue(v)
+	if plan != nil && !plan.Settings.IsNull() {
+		// Get planned settings
+		var plannedSettings map[string]string
+		diags = plan.Settings.ElementsAs(ctx, &plannedSettings, false)
+		if diags.HasError() {
+			return nil, errors.New("failed to parse planned settings")
+		}
+		// Only include settings that were in the plan
+		for k := range plannedSettings {
+			if v, ok := table.Settings[k]; ok {
+				settingsMap[k] = types.StringValue(v)
+			}
+		}
 	}
 	settings, diags := types.MapValue(types.StringType, settingsMap)
 	if diags.HasError() {
 		return nil, errors.New("failed to create settings map")
+	}
+
+	// Handle engine normalization - especially for ClickHouse Cloud
+	engine := types.StringValue(table.Engine)
+	if plan != nil && !plan.Engine.IsNull() {
+		// Check if this is a ClickHouse Cloud engine transformation
+		plannedEngine := plan.Engine.ValueString()
+		actualEngine := table.Engine
+		
+		// Normalize engine names for comparison (remove parentheses and parameters)
+		normalizedPlanned := normalizeEngineName(plannedEngine)
+		normalizedActual := normalizeEngineName(actualEngine)
+		
+		// Check if this is an expected Cloud transformation
+		if isCloudEngineTransformation(normalizedPlanned, normalizedActual) {
+			// Keep the planned engine to avoid drift
+			engine = plan.Engine
+		} else if normalizedPlanned == normalizedActual {
+			// Same engine type, just different formatting - keep planned value
+			engine = plan.Engine
+		} else {
+			// This is an actual engine change - use the actual value
+			engine = types.StringValue(table.Engine)
+		}
+	}
+
+	// For TTL, use the plan value if available to avoid normalization issues
+	ttl := types.StringPointerValue(table.TTL)
+	if plan != nil && !plan.TTL.IsNull() && table.TTL != nil {
+		ttl = plan.TTL
 	}
 
 	state := &Table{
@@ -458,15 +529,51 @@ func (r *Resource) syncTableState(ctx context.Context, uuid string, clusterName 
 		DatabaseName: types.StringValue(table.DatabaseName),
 		Name:         types.StringValue(table.Name),
 		Columns:      columns,
-		Engine:       types.StringValue(table.Engine),
+		Engine:       engine,
 		OrderBy:      orderByList,
 		PartitionBy:  types.StringPointerValue(table.PartitionBy),
 		PrimaryKey:   primaryKeyList,
 		SampleBy:     types.StringPointerValue(table.SampleBy),
-		TTL:          types.StringPointerValue(table.TTL),
+		TTL:          ttl,
 		Settings:     settings,
 		Comment:      types.StringValue(table.Comment),
 	}
 
 	return state, nil
+}
+
+// normalizeEngineName extracts the base engine name without parameters
+func normalizeEngineName(engine string) string {
+	// Remove everything after the first parenthesis
+	if idx := strings.Index(engine, "("); idx != -1 {
+		return strings.TrimSpace(engine[:idx])
+	}
+	return strings.TrimSpace(engine)
+}
+
+// isCloudEngineTransformation checks if the engine change is an expected ClickHouse Cloud transformation
+func isCloudEngineTransformation(planned, actual string) bool {
+	// Map of engines that get transformed in ClickHouse Cloud
+	cloudTransformations := map[string]string{
+		"MergeTree":          "SharedMergeTree",
+		"ReplacingMergeTree": "SharedReplacingMergeTree",
+		"SummingMergeTree":   "SharedSummingMergeTree",
+		"AggregatingMergeTree": "SharedAggregatingMergeTree",
+		"CollapsingMergeTree": "SharedCollapsingMergeTree",
+		"VersionedCollapsingMergeTree": "SharedVersionedCollapsingMergeTree",
+	}
+	
+	// Check if this is a known transformation
+	if expectedEngine, ok := cloudTransformations[planned]; ok {
+		return actual == expectedEngine
+	}
+	
+	// Also check the reverse (in case someone explicitly uses SharedMergeTree)
+	for original, shared := range cloudTransformations {
+		if planned == shared && actual == original {
+			return true
+		}
+	}
+	
+	return false
 }
