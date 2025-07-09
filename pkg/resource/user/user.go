@@ -65,6 +65,7 @@ func (r *Resource) Schema(_ context.Context, _ resource.SchemaRequest, resp *res
 			},
 			"password_sha256_hash_wo": schema.StringAttribute{
 				Required:    true,
+				Sensitive:   true,
 				Description: "SHA256 hash of the password to be set for the user",
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.RequiresReplace(),
@@ -72,7 +73,6 @@ func (r *Resource) Schema(_ context.Context, _ resource.SchemaRequest, resp *res
 				Validators: []validator.String{
 					stringvalidator.RegexMatches(regexp.MustCompile(`^[a-fA-F0-9]{64}$`), "password_sha256_hash must be a valid SHA256 hash"),
 				},
-				WriteOnly: true,
 			},
 			"password_sha256_hash_wo_version": schema.Int32Attribute{
 				Required:    true,
