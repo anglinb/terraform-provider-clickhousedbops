@@ -146,7 +146,7 @@ resource "clickhousedbops_table" "inventory_table" {
   comment = "Product inventory with version-based deduplication"
 }
 
-# Example 5: Table with sampling
+# Example 5: Simple metrics table
 resource "clickhousedbops_table" "metrics_table" {
   database_name = clickhousedbops_database.test_db.name
   name          = "server_metrics"
@@ -177,8 +177,6 @@ resource "clickhousedbops_table" "metrics_table" {
   
   engine       = "MergeTree()"
   order_by     = ["server_id", "timestamp", "metric_name"]
-  primary_key  = ["server_id", "timestamp"]
-  sample_by    = "intHash32(server_id)"
   partition_by = "toStartOfDay(timestamp)"
 }
 

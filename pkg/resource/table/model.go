@@ -18,6 +18,7 @@ type Table struct {
 	TTL          types.String `tfsdk:"ttl"`
 	Settings     types.Map    `tfsdk:"settings"`
 	Comment      types.String `tfsdk:"comment"`
+	AllowDrops   types.Bool   `tfsdk:"allow_drops"`
 }
 
 type Column struct {

@@ -13,6 +13,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/booldefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/listdefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/listplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/mapdefault"
@@ -36,6 +37,7 @@ var (
 	_ resource.Resource                = &Resource{}
 	_ resource.ResourceWithConfigure   = &Resource{}
 	_ resource.ResourceWithImportState = &Resource{}
+	_ resource.ResourceWithModifyPlan  = &Resource{}
 )
 
 // NewResource is a helper function to simplify the provider implementation.
@@ -91,7 +93,7 @@ func (r *Resource) Schema(_ context.Context, _ resource.SchemaRequest, resp *res
 			},
 			"columns": schema.ListNestedAttribute{
 				Required:    true,
-				Description: "List of columns in the table",
+				Description: "List of columns in the table. New columns can be added without recreating the table. Removing columns or modifying existing columns requires table recreation.",
 				NestedObject: schema.NestedAttributeObject{
 					Attributes: map[string]schema.Attribute{
 						"name": schema.StringAttribute{
@@ -115,10 +117,7 @@ func (r *Resource) Schema(_ context.Context, _ resource.SchemaRequest, resp *res
 						},
 					},
 				},
-				PlanModifiers: []planmodifier.List{
-					// Any change to columns requires table recreation
-					listplanmodifier.RequiresReplace(),
-				},
+				// Removed RequiresReplace - we'll handle updates in the Update method
 			},
 			"order_by": schema.ListAttribute{
 				Optional:    true,
@@ -185,6 +184,12 @@ func (r *Resource) Schema(_ context.Context, _ resource.SchemaRequest, resp *res
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.RequiresReplace(),
 				},
+			},
+			"allow_drops": schema.BoolAttribute{
+				Optional:    true,
+				Computed:    true,
+				Description: "Allow column and table drops. When set to false (default), attempts to remove columns or delete the table will fail as a safety measure. Set to true to allow destructive operations.",
+				Default:     booldefault.StaticBool(false),
 			},
 		},
 		MarkdownDescription: tableResourceDescription,
@@ -324,7 +329,96 @@ func (r *Resource) Read(ctx context.Context, req resource.ReadRequest, resp *res
 }
 
 func (r *Resource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
-	panic("unsupported")
+	var plan, state Table
+	diags := req.Plan.Get(ctx, &plan)
+	resp.Diagnostics.Append(diags...)
+	diags = req.State.Get(ctx, &state)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	// Compare columns to find additions and removals
+	stateColumns := make(map[string]Column)
+	for _, col := range state.Columns {
+		stateColumns[col.Name.ValueString()] = col
+	}
+
+	planColumns := make(map[string]Column)
+	for _, col := range plan.Columns {
+		planColumns[col.Name.ValueString()] = col
+	}
+
+	// Find new columns to add
+	var columnsToAdd []querybuilder.TableColumn
+	for _, planCol := range plan.Columns {
+		colName := planCol.Name.ValueString()
+		if _, exists := stateColumns[colName]; !exists {
+			// This is a new column
+			columnsToAdd = append(columnsToAdd, querybuilder.TableColumn{
+				Name:    planCol.Name.ValueString(),
+				Type:    planCol.Type.ValueString(),
+				Default: planCol.Default.ValueStringPointer(),
+				Comment: planCol.Comment.ValueStringPointer(),
+			})
+		}
+	}
+
+	// Find columns to remove
+	var columnsToRemove []string
+	for _, stateCol := range state.Columns {
+		colName := stateCol.Name.ValueString()
+		if _, exists := planColumns[colName]; !exists {
+			// This column should be removed
+			columnsToRemove = append(columnsToRemove, colName)
+		}
+	}
+
+	// Remove columns if any
+	if len(columnsToRemove) > 0 {
+		// Check if drops are allowed
+		if !plan.AllowDrops.ValueBool() {
+			resp.Diagnostics.AddError(
+				"Column removal not allowed",
+				fmt.Sprintf("Cannot remove columns %v because 'allow_drops' is set to false. To allow column removal, set 'allow_drops = true' in your table configuration.", columnsToRemove),
+			)
+			return
+		}
+		
+		err := r.client.DropTableColumns(ctx, state.DatabaseName.ValueString(), state.Name.ValueString(), columnsToRemove, state.ClusterName.ValueStringPointer())
+		if err != nil {
+			resp.Diagnostics.AddError(
+				"Error removing columns from table",
+				fmt.Sprintf("Failed to remove columns: %+v\n", err),
+			)
+			return
+		}
+	}
+
+	// Add new columns if any
+	if len(columnsToAdd) > 0 {
+		err := r.client.AddTableColumns(ctx, state.DatabaseName.ValueString(), state.Name.ValueString(), columnsToAdd, state.ClusterName.ValueStringPointer())
+		if err != nil {
+			resp.Diagnostics.AddError(
+				"Error adding columns to table",
+				fmt.Sprintf("Failed to add columns: %+v\n", err),
+			)
+			return
+		}
+	}
+
+	// Sync state with the updated table
+	updatedState, err := r.syncTableState(ctx, state.UUID.ValueString(), state.ClusterName.ValueStringPointer(), &plan)
+	if err != nil {
+		resp.Diagnostics.AddError(
+			"Error syncing table state",
+			fmt.Sprintf("%+v\n", err),
+		)
+		return
+	}
+
+	diags = resp.State.Set(ctx, updatedState)
+	resp.Diagnostics.Append(diags...)
 }
 
 func (r *Resource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
@@ -332,6 +426,15 @@ func (r *Resource) Delete(ctx context.Context, req resource.DeleteRequest, resp 
 	diags := req.State.Get(ctx, &plan)
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	// Check if drops are allowed
+	if !plan.AllowDrops.ValueBool() {
+		resp.Diagnostics.AddError(
+			"Table deletion not allowed",
+			fmt.Sprintf("Cannot delete table '%s' because 'allow_drops' is set to false. To allow table deletion, set 'allow_drops = true' in your table configuration.", plan.Name.ValueString()),
+		)
 		return
 	}
 
@@ -523,6 +626,14 @@ func (r *Resource) syncTableState(ctx context.Context, uuid string, clusterName 
 		ttl = plan.TTL
 	}
 
+	// Preserve the allow_drops setting from the plan
+	var allowDrops types.Bool
+	if plan != nil {
+		allowDrops = plan.AllowDrops
+	} else {
+		allowDrops = types.BoolValue(false)
+	}
+
 	state := &Table{
 		ClusterName:  types.StringPointerValue(clusterName),
 		UUID:         types.StringValue(table.UUID),
@@ -537,6 +648,7 @@ func (r *Resource) syncTableState(ctx context.Context, uuid string, clusterName 
 		TTL:          ttl,
 		Settings:     settings,
 		Comment:      types.StringValue(table.Comment),
+		AllowDrops:   allowDrops,
 	}
 
 	return state, nil
@@ -576,4 +688,94 @@ func isCloudEngineTransformation(planned, actual string) bool {
 	}
 	
 	return false
+}
+
+// ModifyPlan checks if column changes require table recreation
+func (r *Resource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
+	// If the entire resource is being destroyed, skip this check
+	if req.Plan.Raw.IsNull() {
+		return
+	}
+
+	// If this is a create operation, skip this check
+	if req.State.Raw.IsNull() {
+		return
+	}
+
+	var plan, state Table
+	diags := req.Plan.Get(ctx, &plan)
+	resp.Diagnostics.Append(diags...)
+	diags = req.State.Get(ctx, &state)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	// Build maps for comparison
+	stateColumns := make(map[string]Column)
+	for _, col := range state.Columns {
+		stateColumns[col.Name.ValueString()] = col
+	}
+
+	planColumns := make(map[string]Column)
+	for _, col := range plan.Columns {
+		planColumns[col.Name.ValueString()] = col
+	}
+
+	// Get order by columns for checking
+	var orderByColumns []string
+	if !state.OrderBy.IsNull() {
+		diags = state.OrderBy.ElementsAs(ctx, &orderByColumns, false)
+		if diags.HasError() {
+			resp.Diagnostics.Append(diags...)
+			return
+		}
+	}
+
+	// Create a set of order by columns for quick lookup
+	orderBySet := make(map[string]bool)
+	for _, col := range orderByColumns {
+		orderBySet[col] = true
+	}
+
+	// Check for removed or modified columns
+	requiresReplace := false
+	for _, stateCol := range state.Columns {
+		colName := stateCol.Name.ValueString()
+		planCol, exists := planColumns[colName]
+		
+		if !exists {
+			// Column was removed - check if drops are allowed
+			if !plan.AllowDrops.ValueBool() {
+				resp.Diagnostics.AddError(
+					"Column removal not allowed",
+					fmt.Sprintf("Column '%s' cannot be removed because 'allow_drops' is set to false. To allow column removal, set 'allow_drops = true' in your table configuration.", colName),
+				)
+				return
+			}
+			
+			// Check if it's in ORDER BY
+			if orderBySet[colName] {
+				resp.Diagnostics.AddWarning(
+					"Cannot remove column in ORDER BY",
+					fmt.Sprintf("Column '%s' is part of the table's ORDER BY clause and cannot be removed. This requires recreating the table.", colName),
+				)
+				requiresReplace = true
+			}
+			// Otherwise, column can be dropped without recreation
+		} else if !stateCol.Type.Equal(planCol.Type) {
+			// Column type changed
+			resp.Diagnostics.AddWarning(
+				"Column type change requires table recreation",
+				fmt.Sprintf("Column '%s' type change from '%s' to '%s' requires recreating the table.", 
+					colName, stateCol.Type.ValueString(), planCol.Type.ValueString()),
+			)
+			requiresReplace = true
+		}
+	}
+
+	// If recreation is required, mark the resource for replacement
+	if requiresReplace {
+		resp.RequiresReplace = append(resp.RequiresReplace, path.Root("columns"))
+	}
 }

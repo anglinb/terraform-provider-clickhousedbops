@@ -2,6 +2,8 @@ package dbops
 
 import (
 	"context"
+
+	"github.com/ClickHouse/terraform-provider-clickhousedbops/internal/querybuilder"
 )
 
 type Client interface {
@@ -35,4 +37,6 @@ type Client interface {
 	GetTable(ctx context.Context, uuid string, clusterName *string) (*Table, error)
 	DeleteTable(ctx context.Context, uuid string, clusterName *string) error
 	FindTableByName(ctx context.Context, databaseName, tableName string, clusterName *string) (*Table, error)
+	AddTableColumns(ctx context.Context, databaseName, tableName string, columns []querybuilder.TableColumn, clusterName *string) error
+	DropTableColumns(ctx context.Context, databaseName, tableName string, columnNames []string, clusterName *string) error
 }

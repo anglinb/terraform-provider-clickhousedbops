@@ -339,3 +339,35 @@ func parseEngineFullForTTLAndSettings(engineFull string) (string, map[string]str
 
 	return ttl, settings
 }
+
+func (i *impl) AddTableColumns(ctx context.Context, databaseName, tableName string, columns []querybuilder.TableColumn, clusterName *string) error {
+	query, err := querybuilder.NewAlterTableAddColumn(databaseName, tableName, columns).
+		WithCluster(clusterName).
+		Build()
+	if err != nil {
+		return errors.WithMessage(err, "error building ALTER TABLE ADD COLUMN query")
+	}
+
+	err = i.clickhouseClient.Exec(ctx, query)
+	if err != nil {
+		return errors.WithMessage(err, "error adding columns to table")
+	}
+
+	return nil
+}
+
+func (i *impl) DropTableColumns(ctx context.Context, databaseName, tableName string, columnNames []string, clusterName *string) error {
+	query, err := querybuilder.NewAlterTableDropColumn(databaseName, tableName, columnNames).
+		WithCluster(clusterName).
+		Build()
+	if err != nil {
+		return errors.WithMessage(err, "error building ALTER TABLE DROP COLUMN query")
+	}
+
+	err = i.clickhouseClient.Exec(ctx, query)
+	if err != nil {
+		return errors.WithMessage(err, "error dropping columns from table")
+	}
+
+	return nil
+}
