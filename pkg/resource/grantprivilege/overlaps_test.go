@@ -5,7 +5,7 @@ import (
 
 	"github.com/hashicorp/terraform-plugin-framework/types"
 
-	"github.com/ClickHouse/terraform-provider-clickhousedbops/internal/dbops"
+	"github.com/anglinb/terraform-provider-clickhousedbops/internal/dbops"
 )
 
 func Test_overlaps(t *testing.T) {

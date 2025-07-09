@@ -18,7 +18,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 
-	"github.com/ClickHouse/terraform-provider-clickhousedbops/internal/dbops"
+	"github.com/anglinb/terraform-provider-clickhousedbops/internal/dbops"
 )
 
 //go:embed user.md

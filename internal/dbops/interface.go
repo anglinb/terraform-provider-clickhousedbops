@@ -3,7 +3,7 @@ package dbops
 import (
 	"context"
 
-	"github.com/ClickHouse/terraform-provider-clickhousedbops/internal/querybuilder"
+	"github.com/anglinb/terraform-provider-clickhousedbops/internal/querybuilder"
 )
 
 type Client interface {

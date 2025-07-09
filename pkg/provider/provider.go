@@ -13,15 +13,15 @@ import (
 	tfresource "github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 
-	"github.com/ClickHouse/terraform-provider-clickhousedbops/internal/clickhouseclient"
-	"github.com/ClickHouse/terraform-provider-clickhousedbops/internal/dbops"
-	"github.com/ClickHouse/terraform-provider-clickhousedbops/pkg/project"
-	"github.com/ClickHouse/terraform-provider-clickhousedbops/pkg/resource/database"
-	"github.com/ClickHouse/terraform-provider-clickhousedbops/pkg/resource/grantprivilege"
-	"github.com/ClickHouse/terraform-provider-clickhousedbops/pkg/resource/grantrole"
-	"github.com/ClickHouse/terraform-provider-clickhousedbops/pkg/resource/role"
-	"github.com/ClickHouse/terraform-provider-clickhousedbops/pkg/resource/table"
-	"github.com/ClickHouse/terraform-provider-clickhousedbops/pkg/resource/user"
+	"github.com/anglinb/terraform-provider-clickhousedbops/internal/clickhouseclient"
+	"github.com/anglinb/terraform-provider-clickhousedbops/internal/dbops"
+	"github.com/anglinb/terraform-provider-clickhousedbops/pkg/project"
+	"github.com/anglinb/terraform-provider-clickhousedbops/pkg/resource/database"
+	"github.com/anglinb/terraform-provider-clickhousedbops/pkg/resource/grantprivilege"
+	"github.com/anglinb/terraform-provider-clickhousedbops/pkg/resource/grantrole"
+	"github.com/anglinb/terraform-provider-clickhousedbops/pkg/resource/role"
+	"github.com/anglinb/terraform-provider-clickhousedbops/pkg/resource/table"
+	"github.com/anglinb/terraform-provider-clickhousedbops/pkg/resource/user"
 )
 
 const (

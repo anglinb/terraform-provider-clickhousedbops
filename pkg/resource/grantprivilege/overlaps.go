@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/ClickHouse/terraform-provider-clickhousedbops/internal/dbops"
+	"github.com/anglinb/terraform-provider-clickhousedbops/internal/dbops"
 )
 
 func overlaps(current GrantPrivilege, existing dbops.GrantPrivilege) bool {

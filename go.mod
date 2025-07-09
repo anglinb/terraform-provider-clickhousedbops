@@ -1,4 +1,4 @@
-module github.com/ClickHouse/terraform-provider-clickhousedbops
+module github.com/anglinb/terraform-provider-clickhousedbops
 
 go 1.23.0
 

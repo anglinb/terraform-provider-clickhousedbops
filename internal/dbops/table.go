@@ -6,8 +6,8 @@ import (
 
 	"github.com/pingcap/errors"
 
-	"github.com/ClickHouse/terraform-provider-clickhousedbops/internal/clickhouseclient"
-	"github.com/ClickHouse/terraform-provider-clickhousedbops/internal/querybuilder"
+	"github.com/anglinb/terraform-provider-clickhousedbops/internal/clickhouseclient"
+	"github.com/anglinb/terraform-provider-clickhousedbops/internal/querybuilder"
 )
 
 type Table struct {

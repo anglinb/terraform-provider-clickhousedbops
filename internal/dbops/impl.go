@@ -1,7 +1,7 @@
 package dbops
 
 import (
-	"github.com/ClickHouse/terraform-provider-clickhousedbops/internal/clickhouseclient"
+	"github.com/anglinb/terraform-provider-clickhousedbops/internal/clickhouseclient"
 )
 
 type impl struct {

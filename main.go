@@ -7,7 +7,7 @@ import (
 
 	"github.com/hashicorp/terraform-plugin-framework/providerserver"
 
-	"github.com/ClickHouse/terraform-provider-clickhousedbops/pkg/provider"
+	"github.com/anglinb/terraform-provider-clickhousedbops/pkg/provider"
 )
 
 func main() {
@@ -17,7 +17,7 @@ func main() {
 	flag.Parse()
 
 	opts := providerserver.ServeOpts{
-		Address: "registry.terraform.io/ClickHouse/clickhousedbops",
+		Address: "registry.terraform.io/anglinb/clickhousedbops",
 		Debug:   debug,
 	}
 

@@ -14,7 +14,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 
-	"github.com/ClickHouse/terraform-provider-clickhousedbops/internal/dbops"
+	"github.com/anglinb/terraform-provider-clickhousedbops/internal/dbops"
 )
 
 //go:embed role.md
